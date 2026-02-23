@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Journal of Speculative Worldbuilding</title>
+
+<style>
+* {box-sizing: border-box}
+
+body {
+  margin: 0;
+  font-family: Arial, Helvetica, sans-serif;
+  background: linear-gradient(135deg, #6a5acd, #7b68ee);
+  display: flex;
+  justify-content: center;
+  padding: 20px;
+}
+
+.container {
+  background: white;
+  width: 100%;
+  max-width: 600px;
+  padding: 20px;
+  border-radius: 20px;
+  overflow: hidden;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 100px;
+  max-height: 300px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  width: 100%;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid #ccc;
+  font-size: 16px;
+  margin-bottom: 10px;
+}
+
+input {
+  width: 100%;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid #ccc;
+  font-size: 16px;
+  margin-bottom: 10px;
+}
+
+button {
+  width: 100%;
+  padding: 14px;
+  border: none;
+  border-radius: 12px;
+  background: #6a5acd;
+  color: white;
+  font-size: 18px;
+  cursor: pointer;
+}
+
+button:hover { background: #5941c9; }
+
+.post {
+  background: #f1f1f1;
+  padding: 15px;
+  border-radius: 12px;
+  margin-top: 12px;
+}
+
+.name { font-weight: bold; margin-bottom: 6px; }
+
+.content {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.deleteBtn {
+  margin-top: 8px;
+  background: #ff4d4d;
+  border: none;
+  color: white;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.moreBtn {
+  color: #6a5acd;
+  cursor: pointer;
+  font-size: 14px;
+  margin-top: 6px;
+  display: inline-block;
+  margin-right: 10px;
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+  <h2>💬 Write Your Own Story</h2>
+
+  <input id="nicknameInput" placeholder="Nickname (Optional)" />
+  <textarea id="statusInput" placeholder="Your idea"></textarea>
+  <button onclick="postStatus()">Post</button>
+
+  <div id="posts"></div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import {
+  getFirestore, collection, addDoc, query, orderBy,
+  onSnapshot, serverTimestamp, deleteDoc, doc
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+/* 🔥 Firebase */
+const firebaseConfig = {
+  apiKey: "AIzaSyC3Yu_mU38Ru7PIEGR-2rNSo5FoelowrUQ",
+  authDomain: "tuanhh-f16a9.firebaseapp.com",
+  projectId: "tuanhh-f16a9",
+  storageBucket: "tuanhh-f16a9.appspot.com",
+  messagingSenderId: "71969140903",
+  appId: "1:71969140903:web:49986baacfbbd1f9e8ab82"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+/* 🌍 Azure Translator */
+const AZURE_KEY = "6rJ6HYTwtmUotxFYAPRfsyQgJGAhz1G434PD1d8CcS0LC4aYxB7bJQQJ99CBAC3pKaRXJ3w3AAAbACOGZpu7";
+const AZURE_REGION = "eastasia";
+const AZURE_ENDPOINT = "https://api.cognitive.microsofttranslator.com";
+
+// 🌍 lấy ngôn ngữ người truy cập
+function getUserLanguage() {
+  return (navigator.language || "en").split("-")[0];
+}
+
+// 🔍 detect ngôn ngữ văn bản
+async function detectLanguage(text) {
+  const res = await fetch(
+    AZURE_ENDPOINT + "/detect?api-version=3.0",
+    {
+      method: "POST",
+      headers: {
+        "Ocp-Apim-Subscription-Key": AZURE_KEY,
+        "Ocp-Apim-Subscription-Region": AZURE_REGION,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify([{ Text: text }])
+    }
+  );
+
+  const data = await res.json();
+  return data[0]?.language || "en";
+}
+
+// 🌐 dịch văn bản
+async function translateText(text, toLang) {
+  const res = await fetch(
+    AZURE_ENDPOINT + `/translate?api-version=3.0&to=${toLang}`,
+    {
+      method: "POST",
+      headers: {
+        "Ocp-Apim-Subscription-Key": AZURE_KEY,
+        "Ocp-Apim-Subscription-Region": AZURE_REGION,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify([{ Text: text }])
+    }
+  );
+
+  const data = await res.json();
+  return data[0]?.translations[0]?.text || text;
+}
+
+/* 🔑 Admin */
+const ADMIN_KEY = "123456";
+const params = new URLSearchParams(window.location.search);
+const isAdmin = params.get("admin") === ADMIN_KEY;
+
+/* Post */
+window.postStatus = async () => {
+  const text = statusInput.value.trim();
+  let nickname = nicknameInput.value.trim();
+  if (!text) return alert("Write Something!");
+  if (!nickname) nickname = "Anonymous";
+
+  await addDoc(collection(db, "statuses"), {
+    text,
+    nickname,
+    time: serverTimestamp()
+  });
+
+  statusInput.value = "";
+};
+
+/* Delete */
+window.deleteStatus = async (id) => {
+  if (confirm("Delete this post?"))
+    await deleteDoc(doc(db, "statuses", id));
+};
+
+/* Realtime posts */
+const q = query(collection(db, "statuses"), orderBy("time", "desc"));
+
+onSnapshot(q, snapshot => {
+  posts.innerHTML = "";
+
+  snapshot.forEach(docSnap => {
+    const data = docSnap.data();
+
+    const div = document.createElement("div");
+    div.className = "post";
+
+    const nameDiv = document.createElement("div");
+    nameDiv.className = "name";
+    nameDiv.textContent = data.nickname || "Anonymous";
+
+    const contentDiv = document.createElement("div");
+    contentDiv.className = "content";
+
+    const fullText = data.text || "";
+    const shortText = fullText.slice(0, 200);
+    const needsToggle = fullText.length > 200;
+
+    contentDiv.textContent = needsToggle ? shortText + "..." : fullText;
+
+    const timeDiv = document.createElement("div");
+    timeDiv.style.fontSize = "12px";
+    timeDiv.style.opacity = "0.6";
+    timeDiv.textContent =
+      data.time?.toDate?.().toLocaleString() || "";
+
+    div.appendChild(nameDiv);
+    div.appendChild(contentDiv);
+    div.appendChild(timeDiv);
+
+    /* Expand */
+    if (needsToggle) {
+      const toggle = document.createElement("span");
+      toggle.className = "moreBtn";
+      toggle.textContent = "Expand";
+      let expanded = false;
+
+      toggle.onclick = () => {
+        expanded = !expanded;
+        contentDiv.textContent = expanded ? fullText : shortText + "...";
+        toggle.textContent = expanded ? "Shorten" : "Expand";
+      };
+
+      div.appendChild(toggle);
+    }
+
+/* 🌍 Translate */
+const translateBtn = document.createElement("span");
+translateBtn.className = "moreBtn";
+translateBtn.textContent = "Translate";
+
+let translated = false;
+let translatedText = "";
+const userLang = getUserLanguage();
+
+translateBtn.onclick = async () => {
+  try {
+    if (!translated) {
+      translateBtn.textContent = "Translating...";
+
+      const sourceLang = await detectLanguage(fullText);
+
+      // nếu cùng ngôn ngữ → không cần dịch
+      if (sourceLang === userLang) {
+        translateBtn.textContent = "Same language";
+        setTimeout(() => translateBtn.textContent = "Translate", 1500);
+        return;
+      }
+
+      translatedText = await translateText(fullText, userLang);
+      contentDiv.textContent = translatedText;
+
+      translateBtn.textContent = "Original";
+      translated = true;
+    } else {
+      contentDiv.textContent = needsToggle ? shortText + "..." : fullText;
+      translateBtn.textContent = "Translate";
+      translated = false;
+    }
+  } catch (err) {
+    console.error(err);
+    translateBtn.textContent = "Translate";
+    alert("Translation failed");
+  }
+};
+
+// ⭐ QUAN TRỌNG: thêm nút vào bài viết
+div.appendChild(translateBtn);
+
+    /* Admin delete */
+    if (isAdmin) {
+      const delBtn = document.createElement("button");
+      delBtn.className = "deleteBtn";
+      delBtn.textContent = "❌ Delete";
+      delBtn.onclick = () => deleteStatus(docSnap.id);
+      div.appendChild(delBtn);
+    }
+
+    posts.appendChild(div);
+  });
+});
+</script>
+
+</body>
+</html>
+
+
+
+
